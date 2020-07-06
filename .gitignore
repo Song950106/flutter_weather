@@ -46,3 +46,9 @@ app.*.symbols
 
 # Obfuscation related
 app.*.map.json
+
+
+#local.properties
+*.properties
+#weather_flutter.iml
+*.iml
