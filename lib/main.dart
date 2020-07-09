@@ -1,5 +1,8 @@
+import 'dart:async';
 import 'dart:math';
+import 'dart:convert';
 import 'dart:ui' as ui;
+import 'JsonBean/JsonBeans.dart';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -9,10 +12,13 @@ import 'package:flutter/widgets.dart';
 final smallFront = TextStyle(color: Colors.white,fontSize:16);
 final double commonMargin = 60.0;
 final double smallMargin = 20.0;
+bool isUpdating = false;
 // index 2 should be variable
 List<String> paramsName = ["空气质量","PM2.5","东南风","体感温度","湿度","能见度","紫外线","气压"];
 List<String> paramsValue = ["良","28","7.2km/h","28℃","58%","19.9km","最弱","991hPa"];
-const platform = const MethodChannel('com.example.weather.weatherData');
+const platform = const MethodChannel('com.example.weather.methodChannel');
+const EventChannel _eventChannelPlugin = EventChannel("com.example.weather.eventChannel");
+StreamSubscription _streamSubscription;
 
 void main(){
   WidgetsFlutterBinding.ensureInitialized();
@@ -47,8 +53,7 @@ class MyApp extends StatelessWidget {
 }
 
 class MainPage extends StatefulWidget{
-  @override
-  // ignore: missing_return
+
   State<StatefulWidget> createState() {
       return _MainPageState("郑州","刚刚更新");
   }
@@ -56,16 +61,39 @@ class MainPage extends StatefulWidget{
 
 class _MainPageState extends State<MainPage>{
 
-  _MainPageState(this._city,this._updateTime);
+  void _onToDart(message) {
+    Map map = json.decode(message);
+    print("======= $map  =============");
+    weeklyWeatherData = WeeklyWeatherData.fromJson(map);
+    print("======= ${weeklyWeatherData.updateTime}  =============");
+  }
+  //当native出错时，发送的数据
+  void _onToDartError(error) {
+    print(error);
+  }
+  //当native发送数据完成时调用的方法，每一次发送完成就会调用
+  void _onDone() {
+    print("消息传递完毕");
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _streamSubscription = _eventChannelPlugin
+    //["abc", 123, "你好"]对应着Android端onListen方法的第一个参数，可不传值
+        .receiveBroadcastStream("event channel established")
+        .listen(_onToDart, onError: _onToDartError, onDone: _onDone);
+  }
+
+  _MainPageState(this._city,this._updateTime){
+//   _getWeatherJson(_city);
+  }
     final String _city ;
     String _updateTime;
-
+    WeeklyWeatherData weeklyWeatherData;
 Future<void> _getWeatherJson(String city) async {
   try{
-    String result  = await platform.invokeMethod('getWeatherData');
-    setState(() {
-      _updateTime  = result;
-    });
+    await platform.invokeMethod('getWeatherData');
   }on PlatformException catch (e){
     print("get invoke method error. ${e.message}");
   }
@@ -73,16 +101,51 @@ Future<void> _getWeatherJson(String city) async {
 
   @override
   Widget build(BuildContext context) {
-    _getWeatherJson(_city);
     return Scaffold(
       appBar: WeatherAppBar(city: _city, updateTime: _updateTime),
-      body: Center(
-        child: Container(
-          height: MediaQuery.of(context).size.height * 1.5,
-          decoration: BoxDecoration(
-              gradient: LinearGradient(colors: [Colors.blueAccent,Colors.lightBlueAccent],begin: Alignment.topCenter,end: Alignment.bottomCenter),
+      body: SafeArea(
+          child: RefreshIndicator(
+            // ignore: missing_return
+            onRefresh: _loadData,
+              child: ContentArea(),
           ),
-          child: ListView(
+      ),
+    );
+  }
+
+  Future<void> _loadData() async{
+    setState(() {
+      isUpdating = true;
+    });
+    await Future.delayed(Duration(seconds: 3),(){
+        print("refresh test ");
+        setState(() {
+          isUpdating = false;
+        });
+  });
+
+    _getWeatherJson(_city);
+  }
+
+  @override
+  void dispose(){
+    super.dispose();
+    if (_streamSubscription != null) {
+      _streamSubscription.cancel();
+      _streamSubscription = null;
+    }
+  }
+}
+
+class ContentArea extends StatelessWidget{
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+        height: MediaQuery.of(context).size.height * 1.5,
+        decoration: BoxDecoration(
+          gradient: LinearGradient(colors: [Colors.blueAccent,Colors.lightBlueAccent],begin: Alignment.topCenter,end: Alignment.bottomCenter),
+        ),
+        child: ListView(
             padding: EdgeInsets.only(top: MediaQuery.of(context).size.height/2 - 100 ),
             children: <Widget>[
               WeatherReport(currTemperature: 25,lowTemperature: 20,highTemperature: 29,weatherStatus: "多云",),
@@ -95,7 +158,7 @@ Future<void> _getWeatherJson(String city) async {
               Container(height: smallMargin),
               Divider(color: Colors.white70),
               Container(
-//                decoration: BoxDecoration(color: Colors.black),
+                //                decoration: BoxDecoration(color: Colors.black),
                 padding: EdgeInsets.only(top: smallMargin ,bottom: smallMargin),
                 height: 100,
                 child: TimeReportRow(),
@@ -105,13 +168,13 @@ Future<void> _getWeatherJson(String city) async {
                 height: MediaQuery.of(context).size.height/3 - 80,
                 child:OtherWetherParams(),
               ),
-            ],
-          ),
-        ),
-      ),
+            ]
+        )
     );
   }
+
 }
+
 
 class WeatherReport extends StatefulWidget{
 
@@ -161,7 +224,7 @@ class WeatherAppBar extends AppBar{
     crossAxisAlignment:CrossAxisAlignment.start,
     children: <Widget>[
       Text(city,style:TextStyle(color:Colors.black,fontSize:26)),
-      Text(updateTime,style:TextStyle(color:Colors.grey,fontSize:13))
+      Text(updateTime,style:isUpdating?TextStyle(color:Colors.white70,fontSize:13) :TextStyle(color:Colors.grey,fontSize:13))
     ],
   );
 
