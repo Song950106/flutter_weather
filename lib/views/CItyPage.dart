@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/widgets.dart';
+import 'package:weather_flutter/views/SearchPage.dart';
+
 
 class Cities extends StatefulWidget{
   @override
@@ -38,7 +39,10 @@ class CitiesState extends State<Cities>{
         foregroundColor: Colors.black,
         tooltip: '添加城市',
         child: Icon(Icons.add),
-        onPressed: null,
+        onPressed: (){
+//          Navigator.of(context).push(MaterialPageRoute(builder: (context){return SearchCity();}));
+          Navigator.of(context).pushNamed("search");
+        },
       ),
     );
   }

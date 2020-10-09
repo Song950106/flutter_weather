@@ -1,14 +1,14 @@
 import 'dart:async';
-import 'dart:convert';
-import 'package:weather_flutter/views/CItyPage.dart';
 
-import 'GlobalValues/Variables.dart';
 import 'package:flutter_boost/flutter_boost.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/widgets.dart';
 
+import 'views/CityPage.dart';
 import 'views/MainPage.dart';
+import 'views/SearchPage.dart';
+
 
 
 
@@ -56,6 +56,11 @@ class MyAppState extends State<MyApp>{
       builder: FlutterBoost.init(),
       home: Container(),
 //    home: MainPage(),
+      routes: <String,WidgetBuilder>{
+          "mainPage" : (BuildContext context) => MainPage(),
+          "cities"  : (BuildContext context) => Cities(),
+          "search" : (BuildContext context) => SearchCity(),
+    },
     );
   }
 

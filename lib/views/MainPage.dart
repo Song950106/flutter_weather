@@ -2,15 +2,11 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_boost/flutter_boost.dart';
-import 'package:weather_flutter/JsonBean/JsonBeans.dart';
-import 'package:weather_flutter/ToastUtil.dart';
-import 'package:weather_flutter/views/CItyPage.dart';
+import '../JsonBean/JsonBeans.dart';
+import '../ToastUtil.dart';
 import 'dart:math';
 import 'dart:ui' as ui;
 import '../GlobalValues/Variables.dart';
-
-
 
 class MainPage extends StatefulWidget{
 
@@ -21,15 +17,20 @@ class MainPage extends StatefulWidget{
 
 class _MainPageState extends State<MainPage>{
 
-  final String _city ;
+  String _city ;
   String _updateTime;
   WeeklyWeatherData weeklyWeatherData;
+  NowWeatherData nowWeatherData;
+  DailyWeatherData dailyWeatherData;
+  List<TemperaturePair> temperatures;
 
   _MainPageState(this._city,this._updateTime);
 
-  Future<int> _getWeatherJson(String city) async {
+  Future _getWeatherJson(String city) async {
     try{
-      await platform.invokeMethod('getWeatherData',city);
+      await platform.invokeMethod(GET_WEATHER_NOW,city);
+      await platform.invokeMethod(GET_WEATHER_DAILY,city);
+      await platform.invokeMethod(GET_WEATHER_WEEKLY,city);
     }on PlatformException catch (e){
       print("get invoke method error. ${e.message}");
     }
@@ -42,12 +43,16 @@ class _MainPageState extends State<MainPage>{
     streamSubscription = eventChannelPlugin
         .receiveBroadcastStream("event channel established")
         .listen(_onToDart, onError: _onToDartError, onDone: _onDone);
+    _loadData();
   }
 
   @override
   Widget build(BuildContext context) {
+    if(null != ModalRoute.of(context).settings.arguments && "" != ModalRoute.of(context).settings.arguments)
+      _city = ModalRoute.of(context).settings.arguments;
+
     return Scaffold(
-      appBar: WeatherAppBar(context,city: _city, updateTime: _updateTime),
+      appBar: WeatherAppBar(context,city: _city, updateTime: _updateTime,),
       body: SafeArea(
         child: RefreshIndicator(
           // ignore: missing_return
@@ -59,15 +64,36 @@ class _MainPageState extends State<MainPage>{
   }
 
   void _onToDart(message) {
-    Map map = json.decode(message);
+    int flag = int.parse(message.toString()[0]);
+    Map map = json.decode(message.toString().substring(1,message.toString().length));
     if ("200" != map["code"]){
       print("status code is wrong ${map["code"]}");
       return;
     }
     print("======= $map  =============");
-    weeklyWeatherData = WeeklyWeatherData.fromJson(map);
-    print("======= ${weeklyWeatherData.updateTime}  =============");
+    switch(flag){
+      // weather now data
+      case 0 :
+        nowWeatherData = NowWeatherData.fromJson(map);
+        // current temperature && current weather status
+        weatherReportsKey.currentState.updateWeatherNow(int.parse(nowWeatherData.now.temp),
+                                                        nowWeatherData.now.text);
+        break;
+      // weather daily data
+      case 1:
+        dailyWeatherData = DailyWeatherData.fromJson(map);
+        break;
+      // weather weekly data
+      case 2:
+        weeklyWeatherData = WeeklyWeatherData.fromJson(map);
+        // maxTemp && minTemp today
+        weatherReportsKey.currentState.updateWeatherReportState(int.parse(weeklyWeatherData.dailyData[0].tempMin),
+                                                                int.parse(weeklyWeatherData.dailyData[0].tempMax));
+        break;
+    }
+    print("======= ${dailyWeatherData.hourlyData[0].windDir}  =============");
   }
+
   //当native出错时，发送的数据
   void _onToDartError(error) {
     print(error);
@@ -77,13 +103,26 @@ class _MainPageState extends State<MainPage>{
     print("消息传递完毕");
   }
 
+  void _updateWeather(WeeklyWeatherData weeklyWeatherData){
+    List<DailyData> daily_data = weeklyWeatherData.dailyData;
+      for(DailyData data in daily_data){
+        temperatures.add(TemperaturePair(int.parse(data.tempMax), int.parse(data.tempMin)));
+      }
+  }
+
+  void updateWeeklyTemperature(List<TemperaturePair> temperaturePairs){
+    setState(() {
+
+    });
+  }
+
   Future<void> _loadData() async{
     setState(() {
       isUpdating = true;
     });
     int result = await _getWeatherJson("");
     setState(() {isUpdating = false;});
-    if(0 != result){
+    if(-1 == result ){
       Toast.show(context, "网络未连接");
     }
   }
@@ -98,7 +137,22 @@ class _MainPageState extends State<MainPage>{
   }
 }
 
-class ContentArea extends StatelessWidget{
+class ContentArea extends StatefulWidget{
+
+  List<TemperaturePair> temperatures;
+
+  @override
+  State<StatefulWidget> createState() {
+    return ContentAreaState(temperatures:temperatures);
+  }
+
+}
+
+class ContentAreaState extends State<ContentArea>{
+
+  ContentAreaState({this.temperatures});
+  List<TemperaturePair> temperatures;
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -109,11 +163,11 @@ class ContentArea extends StatelessWidget{
         child: ListView(
             padding: EdgeInsets.only(top: MediaQuery.of(context).size.height/2 - 100 ),
             children: <Widget>[
-              WeatherReport(currTemperature: 25,lowTemperature: 20,highTemperature: 29,weatherStatus: "多云",),
+              WeatherReport(weatherReportsKey),
               Container(height: smallMargin),
               WeekPredictionRow(),
               Diagram(
-                temperaturePairs: List.generate(6,(i)=>TemperaturePair(10+pow(-1, i)*3,20+pow(-1, i)*2)),
+                temperaturePairs: null == temperatures? List.generate(6,(i)=>TemperaturePair(10+pow(-1, i)*3,20+pow(-1, i)*2)) : temperatures,
                 itemWidth: MediaQuery.of(context).size.width/6,
               ),
               Container(height: smallMargin),
@@ -139,33 +193,48 @@ class ContentArea extends StatelessWidget{
 
 class WeatherReport extends StatefulWidget{
 
-  const WeatherReport({Key key, this.currTemperature, this.lowTemperature, this.highTemperature, this.weatherStatus}) : super(key: key);
-  final int currTemperature;
-  final int lowTemperature;
-  final int highTemperature;
-  final String weatherStatus;
+  final Key key ;
+
+  const WeatherReport(this.key);
+//  final int currTemperature;
+//  final int lowTemperature;
+//  final int highTemperature;
+//  final String weatherStatus;
 
   @override
   State<StatefulWidget> createState() {
-    return _WeatherReportState(currTemperature,lowTemperature,highTemperature,weatherStatus);
+    return WeatherReportState();
   }
 }
 
-class _WeatherReportState extends State<WeatherReport>{
+class WeatherReportState extends State<WeatherReport>{
+  WeatherReportState();
+  int _currTemperature = 0;
+  int _lowTemperature = 0;
+  int _highTemperature = 0;
+  String _weatherStatus = "";
 
-  _WeatherReportState(this._currTemperature, this._lowTemperature, this._highTemperature, this._weatherStatus);
-  final int _currTemperature;
-  final int _lowTemperature;
-  final int _highTemperature;
-  final String _weatherStatus;
+  void updateWeatherReportState(lowTemperature, highTemperature){
+    setState(() {
+      _lowTemperature = lowTemperature;
+      _highTemperature = highTemperature;
+    });
+  }
+
+  void updateWeatherNow(currTemperature, weatherStatus){
+    setState(() {
+      _currTemperature = currTemperature;
+      _weatherStatus = weatherStatus;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Column(
+    return new Column(
       children: <Widget>[
-        ListTile(
-            title: Text(_currTemperature.toString() + "℃",style: TextStyle(color: Colors.white,fontSize:32 ),),
-            subtitle: Text(_weatherStatus + " " + _lowTemperature.toString() + "/" + _highTemperature.toString(),style: smallFront)
+        new ListTile(
+            title: new Text(_currTemperature.toString() + "℃",style: TextStyle(color: Colors.white,fontSize:32 ),),
+            subtitle: new Text(_weatherStatus + " " + _lowTemperature.toString() + "/" + _highTemperature.toString(),style: smallFront)
         ),
 
       ],
@@ -176,9 +245,10 @@ class _WeatherReportState extends State<WeatherReport>{
 
 class WeatherAppBar extends AppBar{
 
-  WeatherAppBar(this.context,{this.city, this.updateTime}):super();
+  WeatherAppBar(this.context,{this.city, this.updateTime,this.temperatures}):super();
   final String city;
   final String updateTime;
+  List<TemperaturePair> temperatures;
   BuildContext context;
 
   @override
@@ -197,9 +267,7 @@ class WeatherAppBar extends AppBar{
   List<Widget> get actions => [
     IconButton(icon: Icon(Icons.error) ,onPressed: () {  },tooltip: "预警",),
     IconButton(icon: Icon(Icons.location_city),onPressed: (){
-      Navigator.of(context).push(MaterialPageRoute(builder: (context){
-        return Cities();
-      }));
+      Navigator.of(context).pushNamed("cities");
     },tooltip: "城市列表",),
     PopupMenuButton(icon: Icon(Icons.more_vert),tooltip: "更多选项",
       itemBuilder: (BuildContext context)=>
@@ -216,7 +284,27 @@ class WeatherAppBar extends AppBar{
   ];
 }
 
-class WeekPredictionRow extends StatelessWidget{
+class WeekPredictionRow extends StatefulWidget{
+  @override
+  State<StatefulWidget> createState() {
+    return WeekPredictionRowState();
+  }
+}
+
+class WeekPredictionData{
+  WeekPredictionData(offset);
+  int weekday = 1;
+  String date = "2020-10-09";
+  String weatherStatus = "晴";
+}
+// TODO
+class WeekPredictionRowState extends State<WeekPredictionRow>{
+  List<WeekPredictionData> _weekPredictionData = List.generate(7, (index) => WeekPredictionData(index));
+  void updateWeekPredictionRowState(){
+    setState(() {
+
+    });
+  }
   @override
   Widget build(BuildContext context) {
     return  Row(
@@ -276,7 +364,7 @@ class TemperaturePair {
 class Diagram extends StatefulWidget{
 
   Diagram({Key key, this.temperaturePairs,this.itemWidth}) : super(key: key);
-  final List<TemperaturePair> temperaturePairs;
+  List<TemperaturePair> temperaturePairs;
   final double itemWidth;
   @override
   State<StatefulWidget> createState() {
@@ -287,7 +375,7 @@ class Diagram extends StatefulWidget{
 class DiagramState extends State<Diagram>{
 
   DiagramState(this.temperaturePairs,this.itemWidth);
-  final List<TemperaturePair> temperaturePairs;
+  List<TemperaturePair> temperaturePairs;
   final double itemWidth;
 
   @override
